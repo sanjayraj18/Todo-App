@@ -30,11 +30,10 @@ export const SignupController = async (req: Request, res: Response) => {
     const refreshToken = jwt.sign({ userId: user._id }, config.JWT_SECRET, {
       expiresIn: "7d",
     });
-    const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
 
     const session = await sessionModel.create({
       userId: user._id,
-      refreshToken: refreshTokenHash,
+      refreshToken: refreshToken,
       ip: req.ip || "",
       userAgent: req.header("user-agent") || "",
     });
@@ -47,7 +46,7 @@ export const SignupController = async (req: Request, res: Response) => {
     );
 
     await TokenService.storeRefreshToken(
-      refreshTokenHash,
+      refreshToken,
       user._id.toString(),
       session._id.toString(),
     );
@@ -108,11 +107,10 @@ export const SigninController = async (req: Request, res: Response) => {
     const refreshToken = jwt.sign({ userId: userId }, config.JWT_SECRET, {
       expiresIn: "7d",
     });
-    const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
 
     const session = await sessionModel.create({
       userId,
-      refreshToken: refreshTokenHash,
+      refreshToken: refreshToken,
       ip: req.ip || "",
       userAgent: req.header("user-agent") || "",
     });
@@ -125,7 +123,7 @@ export const SigninController = async (req: Request, res: Response) => {
     );
 
     await TokenService.storeRefreshToken(
-      refreshTokenHash,
+      refreshToken,
       user._id.toString(),
       session._id.toString(),
     );
@@ -163,9 +161,7 @@ export const RefreshtokenController = async (req: Request, res: Response) => {
       });
     }
 
-    const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
-
-    const tokenData = await TokenService.getRefreshToken(refreshTokenHash);
+    const tokenData = await TokenService.getRefreshToken(refreshToken);
     if (!tokenData) {
       return res.status(401).json({
         message: "token expired or invalid",
@@ -197,20 +193,15 @@ export const RefreshtokenController = async (req: Request, res: Response) => {
     const newrefreshToken = jwt.sign({ userId: userId }, config.JWT_SECRET, {
       expiresIn: "7d",
     });
-    const newrefreshTokenHash = await bcrypt.hash(newrefreshToken, 10);
 
     const sessionDoc = await sessionModel.findById(sessionId);
     if (sessionDoc) {
-      sessionDoc.refreshToken = newrefreshTokenHash;
+      sessionDoc.refreshToken = newrefreshToken;
       await sessionDoc.save();
     }
 
-    await TokenService.revokeRefreshToken(refreshTokenHash);
-    await TokenService.storeRefreshToken(
-      newrefreshTokenHash,
-      userId,
-      sessionId,
-    );
+    await TokenService.revokeRefreshToken(refreshToken);
+    await TokenService.storeRefreshToken(newrefreshToken, userId, sessionId);
 
     res.cookie("refreshToken", newrefreshToken, {
       httpOnly: true,
@@ -237,24 +228,22 @@ export const LogoutController = async (req: Request, res: Response) => {
       });
     }
 
-    const refreshTokenhash = await bcrypt.hash(refreshToken, 10);
-    if (!refreshTokenhash) {
+    const tokenData = await TokenService.getRefreshToken(refreshToken);
+    if (!tokenData) {
       return res.status(401).json({
-        message: "token not found",
+        message: "Invalid token",
       });
     }
 
-    const tokenData = await TokenService.getRefreshToken(refreshTokenhash);
-    const userId = tokenData.userId;
     const sessionId = tokenData.sessionId;
 
-    const sessionDoc = await sessionModel.findById({ sessionId });
+    const sessionDoc = await sessionModel.findById(sessionId);
     if (sessionDoc) {
       sessionDoc.revoked = true;
       await sessionDoc?.save();
     }
 
-    await TokenService.revokeRefreshToken(refreshTokenhash);
+    await TokenService.revokeRefreshToken(refreshToken);
     await TokenService.revokeSession(sessionId);
 
     res.clearCookie("refreshToken");

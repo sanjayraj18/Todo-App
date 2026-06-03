@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 import config from "../config";
 import { TokenService } from "../service/TokenService";
 
-interface AuthRequest extends Request {
+export interface AuthRequest extends Request {
   userId?: string;
   sessionId?: string;
 }
@@ -35,10 +35,12 @@ const verifyAccessToken = async (
       });
     }
 
-    req.userId = decoded?.id;
+    req.userId = decoded?.userId;
     req.sessionId = decoded?.sessionId;
+    return next();
   } catch (err) {
-    res.status(401).json({
+    console.error("Token verification error:", err);
+    return res.status(401).json({
       message: "Token verification failed from middleware",
     });
   }

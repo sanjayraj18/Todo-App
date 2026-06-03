@@ -19,11 +19,11 @@ export class TokenService {
   }
 
   static async storeRefreshToken(
-    refreshTokenHash: string,
+    refreshToken: string,
     userId: string,
     sessionId: string,
   ) {
-    const key = TOKEN_PREFIX.REFRESH_TOKEN + refreshTokenHash;
+    const key = TOKEN_PREFIX.REFRESH_TOKEN + refreshToken;
     const value = JSON.stringify({
       userId,
       sessionId,
@@ -36,8 +36,8 @@ export class TokenService {
     });
   }
 
-  static async getRefreshToken(refreshTokenHash: string) {
-    const key = TOKEN_PREFIX.REFRESH_TOKEN + refreshTokenHash;
+  static async getRefreshToken(refreshToken: string) {
+    const key = TOKEN_PREFIX.REFRESH_TOKEN + refreshToken;
     const data = await redisClient.get(key);
     return data ? JSON.parse(data) : null;
   }

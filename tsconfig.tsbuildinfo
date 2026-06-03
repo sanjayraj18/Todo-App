@@ -1,1 +1,1 @@
-{"root":["./src/index.ts"],"version":"6.0.3"}
+{"root":["./src/index.ts","./src/config/index.ts","./src/config/redis.ts","./src/controller/authcontroller.ts","./src/controller/todocontroller.ts","./src/db/index.ts","./src/db/redis.ts","./src/middleware/authmiddleware.ts","./src/models/session.schema.ts","./src/models/todo.schema.ts","./src/models/user.schema.ts","./src/routes/authroutes.ts","./src/routes/todoroutes.ts","./src/service/tokenservice.ts"],"version":"6.0.3"}
