@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import config from "../config";
 import sessionModel from "../models/session.schema";
 import userModel from "../models/user.schema";
+import { TokenService } from "../service/TokenService";
 
 export const SignupController = async (req: Request, res: Response) => {
   try {
@@ -13,7 +14,7 @@ export const SignupController = async (req: Request, res: Response) => {
       email,
     });
     if (isAlreadyExists) {
-      res.status(409).json({
+      return res.status(409).json({
         message: "user already exits",
       });
     }
@@ -37,6 +38,19 @@ export const SignupController = async (req: Request, res: Response) => {
       ip: req.ip || "",
       userAgent: req.header("user-agent") || "",
     });
+
+    await TokenService.storeSession(
+      session._id.toString(),
+      user._id.toString(),
+      req.ip || "",
+      req.header("user-agent") || "unknown",
+    );
+
+    await TokenService.storeRefreshToken(
+      refreshTokenHash,
+      user._id.toString(),
+      session._id.toString(),
+    );
 
     const accessToken = jwt.sign(
       { userId: user._id, sessionId: session._id },
@@ -66,8 +80,189 @@ export const SignupController = async (req: Request, res: Response) => {
   }
 };
 
-export const SigninController = () => {};
+export const SigninController = async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body;
 
-export const RefreshtokenController = () => {};
+    const user = await userModel.findOne({ email });
+    if (!user) {
+      return res.status(409).json({
+        message: "User not found, please Signup",
+      });
+    }
 
-export const LogoutController = () => {};
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        message: "password incorrect",
+      });
+    }
+
+    const userId = user?._id;
+    if (!userId) {
+      return res.status(500).json({
+        message: "Error creating session",
+      });
+    }
+
+    const refreshToken = jwt.sign({ userId: userId }, config.JWT_SECRET, {
+      expiresIn: "7d",
+    });
+    const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
+
+    const session = await sessionModel.create({
+      userId,
+      refreshToken: refreshTokenHash,
+      ip: req.ip || "",
+      userAgent: req.header("user-agent") || "",
+    });
+
+    await TokenService.storeSession(
+      session._id.toString(),
+      userId.toString(),
+      req.ip || "",
+      req.header("user-agent") || "unknown",
+    );
+
+    await TokenService.storeRefreshToken(
+      refreshTokenHash,
+      user._id.toString(),
+      session._id.toString(),
+    );
+
+    const accessToken = jwt.sign(
+      { userId: user._id, sessionId: session._id },
+      config.JWT_SECRET,
+      {
+        expiresIn: "15m",
+      },
+    );
+
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "strict",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    res.status(200).json({
+      message: "Login Successful",
+      accessToken,
+    });
+  } catch (err) {
+    console.warn("error in signin", err);
+  }
+};
+
+export const RefreshtokenController = async (req: Request, res: Response) => {
+  try {
+    const refreshToken = req.cookies.refreshToken;
+    if (!refreshToken) {
+      return res.status(401).json({
+        message: "token not found",
+      });
+    }
+
+    const refreshTokenHash = await bcrypt.hash(refreshToken, 10);
+
+    const tokenData = await TokenService.getRefreshToken(refreshTokenHash);
+    if (!tokenData) {
+      return res.status(401).json({
+        message: "token expired or invalid",
+        code: "TOKEN_INVALID",
+      });
+    }
+
+    const sessionId = tokenData.sessionId;
+    const userId = tokenData.userId;
+
+    const session = await TokenService.getSession(sessionId);
+    if (!session) {
+      return res.status(401).json({
+        message: "session not found",
+      });
+    }
+
+    const newaccessToken = jwt.sign(
+      {
+        userId: userId,
+        sessionId: sessionId,
+      },
+      config.JWT_SECRET,
+      {
+        expiresIn: "15m",
+      },
+    );
+
+    const newrefreshToken = jwt.sign({ userId: userId }, config.JWT_SECRET, {
+      expiresIn: "7d",
+    });
+    const newrefreshTokenHash = await bcrypt.hash(newrefreshToken, 10);
+
+    const sessionDoc = await sessionModel.findById(sessionId);
+    if (sessionDoc) {
+      sessionDoc.refreshToken = newrefreshTokenHash;
+      await sessionDoc.save();
+    }
+
+    await TokenService.revokeRefreshToken(refreshTokenHash);
+    await TokenService.storeRefreshToken(
+      newrefreshTokenHash,
+      userId,
+      sessionId,
+    );
+
+    res.cookie("refreshToken", newrefreshToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "strict",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    res.status(200).json({
+      message: "AccessToken refreshed successfully",
+      newaccessToken,
+    });
+  } catch (err) {
+    console.warn("Error in generating refreshToken", err);
+  }
+};
+
+export const LogoutController = async (req: Request, res: Response) => {
+  try {
+    const refreshToken = req.cookies.refreshToken;
+    if (!refreshToken) {
+      return res.status(401).json({
+        message: "token not found",
+      });
+    }
+
+    const refreshTokenhash = await bcrypt.hash(refreshToken, 10);
+    if (!refreshTokenhash) {
+      return res.status(401).json({
+        message: "token not found",
+      });
+    }
+
+    const tokenData = await TokenService.getRefreshToken(refreshTokenhash);
+    const userId = tokenData.userId;
+    const sessionId = tokenData.sessionId;
+
+    const sessionDoc = await sessionModel.findById({ sessionId });
+    if (sessionDoc) {
+      sessionDoc.revoked = true;
+      await sessionDoc?.save();
+    }
+
+    await TokenService.revokeRefreshToken(refreshTokenhash);
+    await TokenService.revokeSession(sessionId);
+
+    res.clearCookie("refreshToken");
+
+    res.status(200).json({
+      message: "logout successful",
+    });
+  } catch (err) {
+    console.warn("Error in loggingout", err);
+  }
+};
